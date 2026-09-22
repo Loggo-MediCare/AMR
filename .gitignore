@@ -12,3 +12,7 @@ __pycache__/
 
 # Backup files
 *.bak
+
+# rosbag2 recordings
+bags/*/
+!bags/amr_status_typed_test/
