@@ -1,27 +1,32 @@
 # ROS 2 Jazzy AMR Status Monitoring Demo
 
-A simple ROS 2 Jazzy publisher/subscriber example for AMR health monitoring.
-
-The demo simulates:
-- Battery voltage
-- Motor temperature
-- Low-battery warning
-- Motor over-temperature warning
-
-The publisher sends random AMR status data on `/amr_status`.
-The subscriber receives the message through `status_callback()` and checks alarm conditions.
+ROS 2 Jazzy AMR health-monitoring prototype using a typed custom message, publisher/subscriber nodes, alarm callbacks, Docker, and rosbag2.
 
 ## Architecture
 
 ```text
-AMR Status Publisher
+Random AMR Sensor Simulation
         |
-        |  /amr_status
         v
-AMR Status Subscriber
+amr_status_publisher
+        |
+        |  amr_interfaces/msg/AMRStatus
+        v
+    /amr_status
+        |
+        +----------------------+
+        |                      |
+        v                      v
+amr_status_subscriber      rosbag2 record
+        |                      |
+        v                      v
+ status_callback()         MCAP recording
+        |                      |
+        +<---- rosbag2 play ---+
         |
         +--> Battery < 22.0 V   -> WARNING
         +--> Motor Temp >= 80 C -> WARNING
+        +--> motors_ready false -> WARNING
 ```
 
 ## Environment
@@ -30,11 +35,43 @@ AMR Status Subscriber
 - Docker
 - Python / `rclpy`
 - Docker container: `ros2-jazzy-dev`
-- ROS workspace: `/root/ros2_ws`
+- Workspace: `/root/ros2_ws`
 
-## Enter the ROS 2 Docker Container
+## Custom Message
 
-From the Mac terminal:
+The project uses:
+
+```text
+amr_interfaces/msg/AMRStatus
+```
+
+Definition:
+
+```text
+float32 battery_voltage
+float32 motor_temperature
+bool motors_ready
+string debug_message
+```
+
+Verify:
+
+```bash
+ros2 interface show amr_interfaces/msg/AMRStatus
+```
+
+Expected:
+
+```text
+float32 battery_voltage
+float32 motor_temperature
+bool motors_ready
+string debug_message
+```
+
+## Start Docker
+
+From macOS:
 
 ```bash
 docker start ros2-jazzy-dev
@@ -48,12 +85,21 @@ source /opt/ros/jazzy/setup.bash
 source /root/ros2_ws/install/setup.bash
 ```
 
-## Build the Package
+## Build
+
+Build the interface first:
 
 ```bash
 cd /root/ros2_ws
 source /opt/ros/jazzy/setup.bash
 
+colcon build --packages-select amr_interfaces
+source install/setup.bash
+```
+
+Build the Python package:
+
+```bash
 colcon build \
   --packages-select my_py_pkg \
   --symlink-install
@@ -61,15 +107,9 @@ colcon build \
 source install/setup.bash
 ```
 
-Expected:
+## Run Publisher
 
-```text
-Summary: 1 package finished
-```
-
-## Run the AMR Status Publisher
-
-Open Terminal A:
+Terminal A:
 
 ```bash
 docker exec -it ros2-jazzy-dev bash
@@ -79,17 +119,17 @@ source /root/ros2_ws/install/setup.bash
 ros2 run my_py_pkg amr_status_publisher
 ```
 
-Example output:
+Example:
 
 ```text
-[INFO] [amr_status_publisher]: AMR random status publisher started
-[INFO] [amr_status_publisher]: Publishing: Battery: 24.3 V | Motor Temp: 47.7 C
-[INFO] [amr_status_publisher]: Publishing: Battery: 22.5 V | Motor Temp: 85.7 C
+Battery=24.3 V | Motor Temp=55.2 C | Motors Ready=True
+Battery=21.8 V | Motor Temp=69.2 C | Motors Ready=False
+Battery=24.4 V | Motor Temp=89.2 C | Motors Ready=False
 ```
 
-## Run the AMR Status Subscriber
+## Run Subscriber
 
-Open Terminal B:
+Terminal B:
 
 ```bash
 docker exec -it ros2-jazzy-dev bash
@@ -99,60 +139,35 @@ source /root/ros2_ws/install/setup.bash
 ros2 run my_py_pkg amr_status_subscriber
 ```
 
-Example output:
+Example:
 
 ```text
-[INFO] [amr_status_subscriber]: AMR status monitor started
-[INFO] [amr_status_subscriber]: Received: Battery: 22.5 V | Motor Temp: 85.7 C
-[WARN] [amr_status_subscriber]: WARNING: MOTOR OVERHEAT! 85.7 C
+Battery=24.3 V | Motor Temp=55.2 C | Motors Ready=True | Status=OK
 
-[INFO] [amr_status_subscriber]: Received: Battery: 21.2 V | Motor Temp: 51.0 C
-[WARN] [amr_status_subscriber]: WARNING: BATTERY LOW! 21.2 V
+Battery=21.8 V | Motor Temp=69.2 C | Motors Ready=False | Status=CHECK AMR
+WARNING: BATTERY LOW! 21.8 V
+AMR MOTORS NOT READY
+
+Battery=24.4 V | Motor Temp=89.2 C | Motors Ready=False | Status=CHECK AMR
+WARNING: MOTOR OVERHEAT! 89.2 C
+AMR MOTORS NOT READY
 ```
 
 ## Subscriber Callback
 
-ROS 2 automatically calls the callback whenever a new `/amr_status` message arrives:
+ROS 2 automatically calls `status_callback()` whenever a typed `AMRStatus` message arrives.
 
 ```python
 def status_callback(self, msg):
-    self.get_logger().info(f'Received: {msg.data}')
+    battery_voltage = msg.battery_voltage
+    motor_temperature = msg.motor_temperature
+    motors_ready = msg.motors_ready
+    debug_message = msg.debug_message
 ```
 
-The callback checks:
-- `motor_temperature >= 80.0`
-- `battery_voltage < 22.0`
+No string parsing or regular expressions are required.
 
-## Inspect the ROS 2 Graph
-
-Open Terminal C:
-
-```bash
-docker exec -it ros2-jazzy-dev bash
-source /opt/ros/jazzy/setup.bash
-source /root/ros2_ws/install/setup.bash
-```
-
-List nodes:
-
-```bash
-ros2 node list
-```
-
-Expected:
-
-```text
-/amr_status_publisher
-/amr_status_subscriber
-```
-
-List topics:
-
-```bash
-ros2 topic list
-```
-
-Show topic info:
+## Inspect the Topic
 
 ```bash
 ros2 topic info /amr_status
@@ -161,121 +176,135 @@ ros2 topic info /amr_status
 Expected:
 
 ```text
-Type: std_msgs/msg/String
+Type: amr_interfaces/msg/AMRStatus
 Publisher count: 1
 Subscription count: 1
 ```
 
-Watch messages:
+View typed messages:
 
 ```bash
 ros2 topic echo /amr_status
 ```
 
-Check frequency:
+Example:
 
-```bash
-ros2 topic hz /amr_status
+```yaml
+battery_voltage: 24.3
+motor_temperature: 85.7
+motors_ready: false
+debug_message: CHECK AMR
+---
 ```
 
-Expected rate is approximately 1 Hz.
+## rosbag2 Record
 
-## Manually Publish a Test Message
-
-Normal:
+Create a persistent recording directory:
 
 ```bash
-ros2 topic pub --once /amr_status std_msgs/msg/String \
-"{data: 'Battery: 24.6 V | Motor Temp: 38.2 C'}"
+mkdir -p /workspace/bags
+cd /workspace/bags
 ```
 
-Motor over-temperature:
+Record:
 
 ```bash
-ros2 topic pub --once /amr_status std_msgs/msg/String \
-"{data: 'Battery: 24.6 V | Motor Temp: 85.0 C'}"
+ros2 bag record \
+  --topics /amr_status \
+  -o amr_status_typed_test
 ```
 
-Low battery:
+Stop recording with `Ctrl+C`.
+
+Inspect:
 
 ```bash
-ros2 topic pub --once /amr_status std_msgs/msg/String \
-"{data: 'Battery: 21.5 V | Motor Temp: 45.0 C'}"
+ros2 bag info /workspace/bags/amr_status_typed_test
 ```
 
-Both alarms:
+The bag should report:
+
+```text
+Topic: /amr_status
+Type: amr_interfaces/msg/AMRStatus
+```
+
+## rosbag2 Replay
+
+Stop the live publisher first:
 
 ```bash
-ros2 topic pub --once /amr_status std_msgs/msg/String \
-"{data: 'Battery: 21.5 V | Motor Temp: 88.0 C'}"
+pkill -f amr_status_publisher
 ```
+
+Confirm:
+
+```bash
+pgrep -af amr_status_publisher
+```
+
+Then replay:
+
+```bash
+ros2 bag play /workspace/bags/amr_status_typed_test
+```
+
+Run the subscriber in another terminal:
+
+```bash
+ros2 run my_py_pkg amr_status_subscriber
+```
+
+The subscriber processes replayed telemetry exactly like live telemetry, including battery and motor-temperature warnings.
 
 ## Project Structure
 
 ```text
-ros2_ws/
-└── src/
-    └── my_py_pkg/
-        ├── package.xml
-        ├── setup.py
+AMR/
+├── README.md
+├── .gitignore
+├── amr_status_ros2_setup.sh
+├── bags/
+│   └── amr_status_typed_test/
+│       ├── amr_status_typed_test_0.mcap
+│       └── metadata.yaml
+└── ros2_ws/
+    └── src/
+        ├── amr_interfaces/
+        │   ├── CMakeLists.txt
+        │   ├── package.xml
+        │   └── msg/
+        │       └── AMRStatus.msg
         └── my_py_pkg/
-            ├── __init__.py
-            ├── amr_status_publisher.py
-            └── amr_status_subscriber.py
+            ├── package.xml
+            ├── setup.py
+            └── my_py_pkg/
+                ├── amr_status_publisher.py
+                └── amr_status_subscriber.py
 ```
 
-## ROS 2 Data Flow
+## Current Milestone
 
 ```text
-Random Battery + Motor Temperature
-              |
-              v
-   amr_status_publisher
-              |
-              | std_msgs/msg/String
-              v
-         /amr_status
-              |
-              v
-   amr_status_subscriber
-              |
-       status_callback()
-              |
-       +------+------+
-       |             |
-       v             v
- Battery Alarm   Motor Alarm
+Typed AMRStatus.msg        ✅
+Typed Publisher            ✅
+Typed Subscriber           ✅
+status_callback() alarms   ✅
+rosbag2 record             ✅
+rosbag2 replay             ✅
+ROS 2 Jazzy + Docker       ✅
 ```
 
-## Next Improvement
-
-The current prototype uses:
+## Next Steps
 
 ```text
-std_msgs/msg/String
-```
-
-A better production-style design is a custom message:
-
-```text
-AMRStatus.msg
-```
-
-For example:
-
-```text
-float32 battery_voltage
-float32 motor_temperature
-bool motors_ready
-string debug_message
-```
-
-This avoids string parsing and is better for dashboards, rosbag2, Jetson, and embedded controllers.
-
-## Stop a Node
-
-Press:
-
-```text
-Ctrl+C
+Real STM32 / sensor telemetry
+        ↓
+ROS 2 AMRStatus
+        ↓
+Health monitoring
+        ↓
+rosbag2 logging
+        ↓
+Jetson / dashboard / diagnostics
 ```
