@@ -1,8 +1,6 @@
-import re
-
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from amr_interfaces.msg import AMRStatus
 
 
 class AMRStatusSubscriber(Node):
@@ -11,40 +9,40 @@ class AMRStatusSubscriber(Node):
         super().__init__('amr_status_subscriber')
 
         self.subscription = self.create_subscription(
-            String,
+            AMRStatus,
             '/amr_status',
             self.status_callback,
             10
         )
 
-        self.get_logger().info('AMR status monitor started')
+        self.get_logger().info(
+            'AMR typed status monitor started'
+        )
 
     def status_callback(self, msg):
 
-        self.get_logger().info(f'Received: {msg.data}')
-
-        match = re.search(
-            r'Battery:\s*([\d.]+)\s*V\s*\|\s*Motor Temp:\s*([\d.]+)\s*C',
-            msg.data
+        self.get_logger().info(
+            f'Battery={msg.battery_voltage:.1f} V | '
+            f'Motor Temp={msg.motor_temperature:.1f} C | '
+            f'Motors Ready={msg.motors_ready} | '
+            f'Status={msg.debug_message}'
         )
 
-        if not match:
-            self.get_logger().error(
-                f'Invalid AMR status message: {msg.data}'
-            )
-            return
-
-        battery_voltage = float(match.group(1))
-        motor_temperature = float(match.group(2))
-
-        if motor_temperature >= 80.0:
+        if msg.motor_temperature >= 80.0:
             self.get_logger().warn(
-                f'WARNING: MOTOR OVERHEAT! {motor_temperature:.1f} C'
+                f'WARNING: MOTOR OVERHEAT! '
+                f'{msg.motor_temperature:.1f} C'
             )
 
-        if battery_voltage < 22.0:
+        if msg.battery_voltage < 22.0:
             self.get_logger().warn(
-                f'WARNING: BATTERY LOW! {battery_voltage:.1f} V'
+                f'WARNING: BATTERY LOW! '
+                f'{msg.battery_voltage:.1f} V'
+            )
+
+        if not msg.motors_ready:
+            self.get_logger().warn(
+                'AMR MOTORS NOT READY'
             )
 
 
@@ -59,7 +57,9 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

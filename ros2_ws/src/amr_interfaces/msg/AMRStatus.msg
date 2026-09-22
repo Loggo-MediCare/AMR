@@ -1,0 +1,4 @@
+float32 battery_voltage
+float32 motor_temperature
+bool motors_ready
+string debug_message
