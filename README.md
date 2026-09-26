@@ -391,11 +391,11 @@ L:12345,R:12312
 The Arduino sketch uses interrupts on encoder channel A and direction inference from the A/B state. It maintains signed cumulative counters:
 
 ```cpp
-volatile long left_ticks;
-volatile long right_ticks;
+volatile int32_t left_ticks;
+volatile int32_t right_ticks;
 ```
 
-Arduino `long` is commonly signed 32-bit on AVR boards, so long-running counters can roll over. The ROS 2 odometry logic handles signed 32-bit rollover when computing tick deltas.
+The firmware intentionally uses fixed-width signed 32-bit counters (`int32_t`) so the host-side Python rollover logic can consistently interpret wraparound with `2**32` arithmetic across Arduino-compatible platforms.
 
 ### ROS 2 Nodes
 
@@ -502,7 +502,7 @@ Rotation calibration:
 Handled cases:
 
 - Signed 32-bit counter rollover: tick deltas are computed with rollover-aware math.
-- Arduino `long` range: documented in firmware and handled in host-side delta calculation.
+- Fixed-width Arduino `int32_t` range: documented in firmware and handled in host-side delta calculation with Python `2**32` rollover logic.
 - Sudden unreasonable tick jumps: ignored using `max_tick_jump`; odometry state is preserved.
 - First reading: initializes previous tick counters without moving the robot.
 - `dt <= 0`: ignored, odometry state is preserved.
