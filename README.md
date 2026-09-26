@@ -268,6 +268,21 @@ AMR/
 │   └── amr_status_typed_test/
 │       ├── amr_status_typed_test_0.mcap
 │       └── metadata.yaml
+├── stl_references/
+│   ├── README.md
+│   ├── stl_360_preview.html
+│   ├── make_stl_preview.py
+│   ├── import_stls_to_freecad.py
+│   ├── rotate_view_freecad.py
+│   ├── bumblebot/
+│   │   ├── Base_Plate.stl
+│   │   └── Bumblebot_3d_Models.zip
+│   └── skycam_camera_mount/
+│       ├── Skycam-camera-front.stl
+│       ├── Skycam-camera-back.stl
+│       ├── Skycam-camera-pan.stl
+│       ├── Skycam-camera-tilt.stl
+│       └── Skycam-pan-tilt-top.stl
 └── ros2_ws/
     └── src/
         ├── amr_interfaces/
@@ -282,6 +297,17 @@ AMR/
                 ├── amr_status_publisher.py
                 └── amr_status_subscriber.py
 ```
+
+## STL References and 360 Preview
+
+`stl_references/` holds candidate mechanical parts pulled from O'Reilly reference material, kept separate from the ROS 2 workspace so they don't get mixed into `colcon build`:
+
+- `bumblebot/` — BumbleBot base plate (`Base_Plate.stl`), from *Build Autonomous Mobile Robot from Scratch using ROS*, Ch. 7. Candidate for a `base_link` mesh in a future URDF.
+- `skycam_camera_mount/` — five-part pan/tilt camera mount, from *3D Printing Projects*, Ch. 8. Reference geometry for a future cuVSLAM camera bracket, not a final Jetson mount.
+
+Open `stl_references/stl_360_preview.html` directly in a browser (no server needed) to spin all 6 parts 360° and sanity-check geometry before committing to a URDF mesh scale. It's a self-contained file — the triangle data is embedded inline, so it works offline.
+
+See `stl_references/README.md` for the STL-to-URDF mesh snippet and scale-unit warning (STL is usually authored in millimeters; URDF expects meters).
 
 ## Current Milestone
 
