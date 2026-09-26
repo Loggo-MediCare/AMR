@@ -26,6 +26,10 @@ setup(
             'calendar_navigation_agent = my_py_pkg.calendar_navigation_agent:main',
             'mock_navigate_to_pose_server = my_py_pkg.mock_navigate_to_pose_server:main',
             'mock_odom_publisher = my_py_pkg.mock_odom_publisher:main',
+            'encoder_serial_bridge = my_py_pkg.encoder_serial_bridge:main',
+            'wheel_odometry_node = my_py_pkg.wheel_odometry_node:main',
+            'simulated_encoder_ticks = my_py_pkg.simulated_encoder_ticks:main',
+            'offline_encoder_odometry_test = my_py_pkg.offline_encoder_odometry_test:main',
 ],
     },
 )

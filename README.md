@@ -283,8 +283,19 @@ AMR/
 │       ├── Skycam-camera-pan.stl
 │       ├── Skycam-camera-tilt.stl
 │       └── Skycam-pan-tilt-top.stl
+├── firmware/
+│   └── arduino/
+│       └── wheel_encoder/
+│           └── wheel_encoder.ino
 └── ros2_ws/
     └── src/
+        ├── amr_description/
+        │   ├── CMakeLists.txt
+        │   ├── package.xml
+        │   ├── launch/
+        │   │   └── display.launch.py
+        │   └── urdf/
+        │       └── amr.urdf
         ├── amr_interfaces/
         │   ├── CMakeLists.txt
         │   ├── package.xml
@@ -295,7 +306,11 @@ AMR/
             ├── setup.py
             └── my_py_pkg/
                 ├── amr_status_publisher.py
-                └── amr_status_subscriber.py
+                ├── amr_status_subscriber.py
+                ├── encoder_serial_bridge.py
+                ├── wheel_odometry_node.py
+                ├── simulated_encoder_ticks.py
+                └── offline_encoder_odometry_test.py
 ```
 
 ## STL References and 360 Preview
@@ -308,6 +323,217 @@ AMR/
 Open `stl_references/stl_360_preview.html` directly in a browser (no server needed) to spin all 6 parts 360° and sanity-check geometry before committing to a URDF mesh scale. It's a self-contained file — the triangle data is embedded inline, so it works offline.
 
 See `stl_references/README.md` for the STL-to-URDF mesh snippet and scale-unit warning (STL is usually authored in millimeters; URDF expects meters).
+
+## Wheel Odometry Pipeline
+
+Milestone 3 replaces the placeholder odom TF with real differential-drive wheel odometry plumbing while keeping the mock node available for regression testing.
+
+```text
+Wheel encoder
+   ↓
+Arduino interrupt counting
+   ↓
+Serial USB
+   ↓
+encoder_serial_bridge
+   ↓
+/left_wheel_ticks + /right_wheel_ticks
+   ↓
+wheel_odometry_node
+   ↓
+differential-drive kinematics
+   ↓
+/odom + odom -> base_footprint TF
+   ↓
+future Nav2/localization
+```
+
+The TF architecture is intentionally:
+
+```text
+odom
+└── base_footprint
+    └── base_link
+        ├── left_wheel_link
+        ├── right_wheel_link
+        ├── camera_link
+        └── imu_link
+```
+
+The wheel odometry node publishes `odom -> base_footprint`. The URDF and `robot_state_publisher` keep the static `base_footprint -> base_link` transform. Do not change this back to `odom -> base_link`.
+
+### Arduino Encoder Firmware
+
+Firmware lives at:
+
+```text
+firmware/arduino/wheel_encoder/wheel_encoder.ino
+```
+
+Assumptions, all placeholders until hardware is selected:
+
+- Encoder type: quadrature encoder with channel A and channel B.
+- Left encoder pins: A=`2`, B=`4`.
+- Right encoder pins: A=`3`, B=`5`.
+- Baud rate: `115200`.
+- Packet format:
+
+```text
+L:<signed_left_ticks>,R:<signed_right_ticks>
+```
+
+Example:
+
+```text
+L:12345,R:12312
+```
+
+The Arduino sketch uses interrupts on encoder channel A and direction inference from the A/B state. It maintains signed cumulative counters:
+
+```cpp
+volatile long left_ticks;
+volatile long right_ticks;
+```
+
+Arduino `long` is commonly signed 32-bit on AVR boards, so long-running counters can roll over. The ROS 2 odometry logic handles signed 32-bit rollover when computing tick deltas.
+
+### ROS 2 Nodes
+
+Serial bridge:
+
+```bash
+ros2 run my_py_pkg encoder_serial_bridge \
+  --ros-args \
+  -p serial_device:=/dev/ttyACM0 \
+  -p baud_rate:=115200
+```
+
+The bridge publishes:
+
+```text
+/left_wheel_ticks   std_msgs/msg/Int64
+/right_wheel_ticks  std_msgs/msg/Int64
+```
+
+If pyserial is missing or `/dev/ttyACM0` is disconnected, the bridge logs a clear error and publishes nothing. It does not invent encoder data.
+
+Wheel odometry:
+
+```bash
+ros2 run my_py_pkg wheel_odometry_node
+```
+
+Parameters, all placeholders until calibrated:
+
+```text
+wheel_radius           0.05 m
+wheel_track            0.24 m
+ticks_per_revolution   600
+```
+
+The node publishes:
+
+```text
+/odom                  nav_msgs/msg/Odometry
+odom -> base_footprint TF
+```
+
+Only one node should publish `odom -> base_footprint` at a time. Do not run `mock_odom_publisher` and `wheel_odometry_node` together.
+
+The `/odom` message includes explicit PLACEHOLDER covariance values for future
+sensor fusion. They are not calibrated yet:
+
+```text
+pose_covariance_x      0.05
+pose_covariance_y      0.05
+pose_covariance_yaw    0.10
+twist_covariance_linear_x   0.10
+twist_covariance_angular_z  0.20
+```
+
+Unmeasured planar dimensions (`z`, `roll`, `pitch`, lateral/vertical twist)
+are assigned high placeholder covariance (`999.0`) to make the uncertainty
+semantics explicit. These values must be tuned from real encoder noise, floor
+slip, and calibration tests before `robot_localization` consumes this odometry.
+
+### Odometry Equations
+
+The implementation intentionally uses the basic differential-drive approximation from the source material:
+
+```text
+ticks_per_meter = ticks_per_revolution / (2 * pi * wheel_radius)
+
+delta_left  = (new_left_ticks  - old_left_ticks)  / ticks_per_meter
+delta_right = (new_right_ticks - old_right_ticks) / ticks_per_meter
+
+delta_distance = (delta_right + delta_left) / 2
+delta_theta    = (delta_right - delta_left) / wheel_track
+
+x     += delta_distance * cos(theta)
+y     += delta_distance * sin(theta)
+theta += delta_theta
+```
+
+Linear and angular velocities are computed as:
+
+```text
+linear_velocity  = delta_distance / dt
+angular_velocity = delta_theta / dt
+```
+
+### Calibration
+
+Calibration has not been performed yet.
+
+Straight-line calibration:
+
+1. Drive the robot physically 1 meter.
+2. Compare measured distance against encoder-calculated distance.
+3. Adjust `wheel_radius`, `ticks_per_revolution`, or equivalent `ticks_per_meter`.
+
+Rotation calibration:
+
+1. Rotate the robot physically 360 degrees (`2*pi` radians).
+2. Compare measured rotation against encoder-calculated `theta`.
+3. Adjust `wheel_track`.
+
+### Overflow and Robustness
+
+Handled cases:
+
+- Signed 32-bit counter rollover: tick deltas are computed with rollover-aware math.
+- Arduino `long` range: documented in firmware and handled in host-side delta calculation.
+- Sudden unreasonable tick jumps: ignored using `max_tick_jump`; odometry state is preserved.
+- First reading: initializes previous tick counters without moving the robot.
+- `dt <= 0`: ignored, odometry state is preserved.
+- Malformed serial packets: ignored by the serial bridge without resetting odometry.
+- Disconnected Arduino: logged clearly; no fake encoder data is generated.
+
+### Simulated Encoder Input
+
+For offline development without Arduino hardware:
+
+```bash
+ros2 run my_py_pkg simulated_encoder_ticks
+```
+
+This node is explicitly simulated test input. It publishes deterministic cumulative tick sequences for stopped, forward, reverse, rotate-in-place, and curved motion cases.
+
+Pure offline math test:
+
+```bash
+ros2 run my_py_pkg offline_encoder_odometry_test
+```
+
+### Future IMU Fusion
+
+Do not configure `robot_localization` yet. Future architecture:
+
+```text
+wheel odometry ─┐
+                ├→ robot_localization EKF → fused odometry
+IMU ────────────┘
+```
 
 ## Current Milestone
 
