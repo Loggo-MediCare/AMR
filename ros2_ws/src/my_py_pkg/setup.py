@@ -23,6 +23,8 @@ setup(
             "test_node = my_py_pkg.my_first_node:main",
             'amr_status_publisher = my_py_pkg.amr_status_publisher:main',
             'amr_status_subscriber = my_py_pkg.amr_status_subscriber:main',
+            'calendar_navigation_agent = my_py_pkg.calendar_navigation_agent:main',
+            'mock_navigate_to_pose_server = my_py_pkg.mock_navigate_to_pose_server:main',
 ],
     },
 )
