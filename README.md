@@ -310,7 +310,9 @@ AMR/
                 ├── encoder_serial_bridge.py
                 ├── wheel_odometry_node.py
                 ├── simulated_encoder_ticks.py
-                └── offline_encoder_odometry_test.py
+                ├── offline_encoder_odometry_test.py
+                ├── simulated_imu_publisher.py
+                └── imu_message_validator.py
 ```
 
 ## STL References and 360 Preview
@@ -525,15 +527,240 @@ Pure offline math test:
 ros2 run my_py_pkg offline_encoder_odometry_test
 ```
 
-### Future IMU Fusion
+## IMU Data Pipeline
 
-Do not configure `robot_localization` yet. Future architecture:
+Milestone 4 adds an isolated, hardware-independent raw IMU pipeline. It does
+not configure `robot_localization`, EKF, Nav2, SLAM, Gazebo, or any
+vendor-specific IMU driver.
 
 ```text
-wheel odometry ─┐
-                ├→ robot_localization EKF → fused odometry
-IMU ────────────┘
+IMU
+ ↓
+sensor_msgs/msg/Imu
+ ↓
+/imu/data_raw
+ ↓
+imu_link
+ ↓
+timestamp / covariance / frame validation
+ ↓
+future robot_localization EKF
 ```
+
+The standard message structure is:
+
+```text
+sensor_msgs/Imu
+├── header.stamp
+├── header.frame_id = "imu_link"
+├── orientation                  geometry_msgs/msg/Quaternion
+├── angular_velocity             geometry_msgs/msg/Vector3
+├── linear_acceleration          geometry_msgs/msg/Vector3
+├── orientation_covariance[9]
+├── angular_velocity_covariance[9]
+└── linear_acceleration_covariance[9]
+```
+
+The raw IMU topic is:
+
+```text
+/imu/data_raw   sensor_msgs/msg/Imu
+```
+
+Every message must use:
+
+```text
+header.frame_id = "imu_link"
+```
+
+The existing URDF owns the static transform:
+
+```text
+base_link -> imu_link
+```
+
+Do not publish a duplicate dynamic TF for `base_link -> imu_link`. The IMU data
+is expressed in the sensor body frame, and tf2 can later transform it relative
+to `base_link`.
+
+### Simulated Raw IMU Source
+
+Offline test node:
+
+```bash
+ros2 run my_py_pkg simulated_imu_publisher
+```
+
+This node is explicitly simulated validation input. It publishes deterministic
+cases on `/imu/data_raw`:
+
+- stationary: angular velocity near zero, configured test acceleration
+- positive yaw rotation: `angular_velocity.z > 0`
+- negative yaw rotation: `angular_velocity.z < 0`
+- forward acceleration: `linear_acceleration.x > 0`
+
+The default stationary test uses `linear_acceleration.z = 9.80665` as a
+simulated test condition. This is not a calibrated physical IMU reading.
+
+### Orientation Semantics
+
+The current simulated source represents a raw IMU stream:
+
+```text
+raw IMU = gyro + accelerometer
+```
+
+It does not provide a legitimate fused orientation estimate, so it marks
+orientation unavailable using the standard `sensor_msgs/Imu` convention:
+
+```text
+orientation_covariance[0] = -1
+```
+
+Do not treat the default orientation fields as a measured identity quaternion.
+If a future physical IMU or onboard estimator provides fused orientation, then
+orientation may be populated legitimately on the appropriate topic.
+
+### IMU Covariance
+
+The simulated source publishes placeholder covariance values:
+
+```text
+angular_velocity_covariance       diagonal 0.01
+linear_acceleration_covariance    diagonal 0.10
+orientation_covariance[0]         -1.0  # orientation unavailable
+```
+
+These values are not calibrated. Final covariance must be tuned from real IMU
+noise, bias, vibration, mounting, and static/dynamic test data before any EKF
+consumes the stream.
+
+### Timestamp Semantics
+
+Every simulated IMU message has a valid `header.stamp` from the ROS clock.
+Because the simulator generates the synthetic measurement at the same instant
+it stamps the message, this stamp is treated as the simulated acquisition time.
+This does not mean future physical IMU drivers should simply stamp packets when
+ROS receives or publishes them.
+
+### Timestamp Integrity and Future Sensor Synchronization
+
+For a moving robot, timestamp error becomes spatial error:
+
+```text
+spatial_error ~= robot_velocity * timestamp_error
+timestamp_error ~= allowed_spatial_error / robot_velocity
+```
+
+Do not hard-code any single tolerance as an AMR requirement. The required
+timestamp tolerance must be derived later from the actual robot speed and the
+allowed spatial error. Higher speed means smaller acceptable timestamp error
+and stricter synchronization.
+
+Keep these three times separate:
+
+- sensor acquisition time: when the physical IMU actually sampled the motion
+- host receive time: when the Jetson/PC/ROS host received the data
+- ROS publish time: when the ROS node constructed or published the message
+
+For future sensor fusion, `header.stamp` should ideally represent the sensor
+acquisition time, already expressed in a ROS-compatible time domain. If a
+physical IMU, microcontroller, transport layer, hardware trigger, or
+synchronized clock provides a trustworthy acquisition timestamp, preserve it.
+Do not overwrite a good hardware timestamp with host receive time or ROS publish
+time just before publishing.
+
+Timestamps from different devices are only directly comparable when their clock
+domains are synchronized or correctly mapped into a common time domain. Future
+hardware may involve an IMU device clock, camera clock, microcontroller clock,
+Jetson system clock, and ROS clock. A numerical timestamp alone does not prove
+the clocks are comparable.
+
+Preferred future timing approaches, documented only:
+
+1. Hardware synchronization where available: shared trigger, PPS, IEEE 1588
+   PTP, hardware timestamping, or camera hardware trigger.
+2. Timestamp-preserving asynchronous ROS data when hardware sync is unavailable:
+   keep each sensor's best acquisition timestamp instead of pretending all
+   measurements occurred together.
+3. Software temporal alignment where an algorithm needs it: buffering,
+   interpolation/extrapolation, timestamp matching, or ApproximateTime for
+   message-pair algorithms.
+
+Do not add PTP, PPS, hardware trigger code, `message_filters`, or
+ApproximateTime synchronization in this milestone. Future EKF-style estimators
+can consume asynchronous timestamped IMU and wheel odometry measurements; the
+important inputs are correct timestamps, frame IDs, covariance, and buffering,
+not artificial pairing.
+
+Delayed measurements are a future Out-of-Sequence Measurement (OOSM) concern. A
+measurement sampled at `t = 10.000` but received at `t = 10.080` must not be
+silently rewritten as if it measured the state at `t = 10.080`. Replacing
+acquisition timestamps with receive timestamps would make correct delayed
+measurement handling impossible later.
+
+Future visual navigation will make timing matter across:
+
+```text
+wheel encoders
+IMU
+stereo / RGB-D camera
+visual odometry / Isaac ROS cuVSLAM
+```
+
+No camera nodes, cuVSLAM, OOSM filtering, or EKF are implemented in this
+milestone.
+
+### Frame and Axis Validation
+
+Validation node:
+
+```bash
+ros2 run my_py_pkg imu_message_validator
+```
+
+It verifies:
+
+- incoming messages use `header.frame_id == "imu_link"`
+- covariance arrays are present
+- orientation availability is explicit
+- TF contains `base_link -> imu_link`
+
+The assumed IMU axes are the axes of `imu_link`. The real physical mounting
+orientation must agree with the URDF/static transform. If a selected sensor's
+axes differ from the robot convention, correct that relationship through the
+URDF/static transform or driver configuration, not by unexplained downstream
+sign inversions.
+
+### Future IMU Fusion
+
+Documented only; not implemented yet:
+
+```text
+wheel odometry ────────┐
+                       │
+IMU gyro/acceleration ─┼──> robot_localization EKF
+                       │
+                       ↓
+                 fused odometry
+```
+
+Later localization will extend the tree toward:
+
+```text
+map
+ ↓
+odom
+ ↓
+base_footprint
+ ↓
+base_link
+ ├── camera_link
+ └── imu_link
+```
+
+No `robot_localization`, EKF parameters, or `map -> odom` transform are added
+in this milestone.
 
 ## Current Milestone
 

@@ -30,6 +30,8 @@ setup(
             'wheel_odometry_node = my_py_pkg.wheel_odometry_node:main',
             'simulated_encoder_ticks = my_py_pkg.simulated_encoder_ticks:main',
             'offline_encoder_odometry_test = my_py_pkg.offline_encoder_odometry_test:main',
+            'simulated_imu_publisher = my_py_pkg.simulated_imu_publisher:main',
+            'imu_message_validator = my_py_pkg.imu_message_validator:main',
 ],
     },
 )
