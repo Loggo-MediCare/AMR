@@ -25,6 +25,7 @@ setup(
             'amr_status_subscriber = my_py_pkg.amr_status_subscriber:main',
             'calendar_navigation_agent = my_py_pkg.calendar_navigation_agent:main',
             'mock_navigate_to_pose_server = my_py_pkg.mock_navigate_to_pose_server:main',
+            'mock_odom_publisher = my_py_pkg.mock_odom_publisher:main',
 ],
     },
 )

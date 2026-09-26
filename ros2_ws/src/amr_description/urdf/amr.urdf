@@ -2,16 +2,23 @@
 <!--
   amr.urdf
 
-  Milestone 1: minimal TF tree for the AMR.
+  Milestone 1/2: minimal TF tree for the AMR.
 
   ALL numeric dimensions and offsets in this file are PLACEHOLDERS.
   They exist only so robot_state_publisher has a valid kinematic tree to
-  broadcast (base_link -> left_wheel_link / right_wheel_link / camera_link /
-  imu_link). None of these numbers come from measured hardware. Replace every
-  value marked "PLACEHOLDER" once the real chassis, wheel, camera, and IMU
-  geometry are known.
+  broadcast (base_footprint -> base_link -> left_wheel_link / right_wheel_link
+  / camera_link / imu_link). None of these numbers come from measured
+  hardware. Replace every value marked "PLACEHOLDER" once the real chassis,
+  wheel, camera, and IMU geometry are known.
 -->
 <robot name="amr">
+
+  <!-- ============================================================ -->
+  <!-- base_footprint: ground-projection reference frame             -->
+  <!-- No geometry of its own; used as the odom -> base_footprint    -->
+  <!-- attachment point per REP 105 / Nav2 convention.                -->
+  <!-- ============================================================ -->
+  <link name="base_footprint"/>
 
   <!-- ============================================================ -->
   <!-- base_link: main chassis                                      -->
@@ -25,6 +32,19 @@
       </geometry>
     </visual>
   </link>
+
+  <!-- ============================================================ -->
+  <!-- base_footprint -> base_link                                   -->
+  <!-- PLACEHOLDER vertical offset: 0.05 m ground clearance.          -->
+  <!-- Not a measured chassis height; replace once the real wheel     -->
+  <!-- radius / chassis geometry is known.                            -->
+  <!-- fixed joint: base_link does not move relative to base_footprint-->
+  <!-- ============================================================ -->
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/> <!-- PLACEHOLDER -->
+  </joint>
 
   <!-- ============================================================ -->
   <!-- left_wheel_link                                               -->
