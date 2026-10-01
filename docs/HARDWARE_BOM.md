@@ -123,6 +123,21 @@ Do NOT assume:
 
 Those are reference-example values only.
 
+### Candidate Magnetic Sensing Technology
+
+"Magnetic incremental" above is a functional requirement, not a specific
+sensing technology. One concrete candidate family is **magnetoresistive
+sensing** (AMR / GMR / GMI — Anisotropic/Giant Magnetoresistance, Giant
+Magneto-Impedance), which uses a Permalloy thin-film resistor whose
+resistance shifts with applied magnetic field. These sensors offer high
+frequency response (up to ~5000 kHz in some parts) and are well suited to
+high-speed, high-precision motor feedback and position sensing. This is a
+candidate sensing technology, not a selected part — the actual encoder IC
+remains TBD per the table above.
+
+Source: *Sensors for Mechatronics* (Paul P.L. Regtien) — reference material
+only, not a component selection.
+
 ## 5. Encoder Counting Convention
 
 Current known firmware architecture:
